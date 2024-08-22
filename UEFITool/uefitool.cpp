@@ -482,7 +482,108 @@ void UEFITool::replaceBody()
 
 void UEFITool::replace(const UINT8 mode)
 {
-    U_UNUSED_PARAMETER(mode);
+    UModelIndex index = ui->structureTreeView->selectionModel()->currentIndex();
+    if (!index.isValid())
+        return;
+
+    UString path;
+    if (model->type(index) == Types::Region) {
+        if (mode == REPLACE_MODE_AS_IS) {
+            path = QFileDialog::getOpenFileName(this, tr("Select region file to replace %1").arg(model->name(index)), currentDir, "Region files (*.rgn *.bin);;All files (*)");
+        }
+        else
+            return;
+    }
+    else if (model->type(index) == Types::Volume) {
+        if (mode == REPLACE_MODE_AS_IS) {
+            path = QFileDialog::getOpenFileName(this, tr("Select volume file to replace selected volume"), currentDir, "Volume files (*.vol *.bin);;All files (*)");
+        }
+        else if (mode == REPLACE_MODE_BODY) {
+            path = QFileDialog::getOpenFileName(this, tr("Select volume body file to replace the body of selected volume"), currentDir, "Volume body files (*.vbd *.bin);;All files (*)");
+        }
+        else
+            return;
+    }
+    else if (model->type(index) == Types::File) {
+        if (mode == REPLACE_MODE_AS_IS) {
+            path = QFileDialog::getOpenFileName(this, tr("Select FFS file to replace %1 file").arg(model->text(index).isEmpty() ? model->name(index) : model->text(index)), 
+                currentDir, "FFS files (*.ffs *.bin);;All files (*)");
+        }
+        else if (mode == REPLACE_MODE_BODY) {
+            if (model->subtype(index) == EFI_FV_FILETYPE_ALL || model->subtype(index) == EFI_FV_FILETYPE_RAW)
+                path = QFileDialog::getOpenFileName(this, tr("Select raw file to replace the body of %1 file").arg(model->text(index).isEmpty() ? model->name(index) : model->text(index)),
+                currentDir, "Raw files (*.raw *.bin);;All files (*)");
+            else if (model->subtype(index) == EFI_FV_FILETYPE_PAD) // Pad file body can't be replaced
+                //!TODO: handle non-empty pad files
+                return;
+            else
+                path = QFileDialog::getOpenFileName(this, tr("Select FFS file body to replace the body of %1 file").arg(model->text(index).isEmpty() ? model->name(index) : model->text(index)),
+                currentDir, "FFS file body files (*.fbd *.bin);;All files (*)");
+        }
+        else
+            return;
+    }
+    else if (model->type(index) == Types::Section) {
+        if (mode == REPLACE_MODE_AS_IS) {
+            path = QFileDialog::getOpenFileName(this, tr("Select section file to replace selected section"), currentDir, "Section files (*.sct *.bin);;All files (*)");
+        }
+        else if (mode == REPLACE_MODE_BODY) {
+            if (model->subtype(index) == EFI_SECTION_COMPRESSION || model->subtype(index) == EFI_SECTION_GUID_DEFINED || model->subtype(index) == EFI_SECTION_DISPOSABLE)
+                path = QFileDialog::getOpenFileName(this, tr("Select FFS file body file to replace the body of selected section"), currentDir, "FFS file body files (*.fbd *.bin);;All files (*)");
+            else if (model->subtype(index) == EFI_SECTION_FIRMWARE_VOLUME_IMAGE)
+                path = QFileDialog::getOpenFileName(this, tr("Select volume file to replace the body of selected section"), currentDir, "Volume files (*.vol *.bin);;All files (*)");
+            else if (model->subtype(index) == EFI_SECTION_RAW)
+                path = QFileDialog::getOpenFileName(this, tr("Select raw file to replace the body of selected section"), currentDir, "Raw files (*.raw *.bin);;All files (*)");
+            else if (model->subtype(index) == EFI_SECTION_PE32 || model->subtype(index) == EFI_SECTION_TE || model->subtype(index) == EFI_SECTION_PIC)
+                path = QFileDialog::getOpenFileName(this, tr("Select EFI executable file to replace the body of selected section"), currentDir, "EFI executable files (*.efi *.dxe *.pei *.bin);;All files (*)");
+            else
+                path = QFileDialog::getOpenFileName(this, tr("Select file to replace the body of selected section"), currentDir, "Binary files (*.bin);;All files (*)");
+        }
+        else
+            return;
+    }
+    else if(model->type(index) == Types::EvsaStore || model->type(index) == Types::CmdbStore ||
+                     model->type(index) == Types::FdcStore || model->type(index) == Types::FlashMapStore ||
+                     model->type(index) == Types::FsysStore || model->type(index) == Types::FtwStore ||
+                     model->type(index) == Types::Vss2Store || model->type(index) == Types::VssStore) {
+        if (mode == REPLACE_MODE_AS_IS) {
+            path = QFileDialog::getOpenFileName(this, tr("Select NVRAM store file to replace selected store"), currentDir, "All files (*)");
+        }
+        else if (mode == REPLACE_MODE_BODY) {
+            path = QFileDialog::getOpenFileName(this, tr("Select NVRAM store body file to replace selected store body"), currentDir, "All files (*)");
+        }
+        else
+            return;
+    }
+    else
+        return;
+
+    if (path.trimmed().isEmpty())
+        return;
+
+    QFileInfo fileInfo = QFileInfo(path);
+    if (!fileInfo.exists()) {
+        ui->statusBar->showMessage(tr("Please select an existing file"));
+        return;
+    }
+
+    QFile inputFile;
+    inputFile.setFileName(path);
+
+    if (!inputFile.open(QFile::ReadOnly)) {
+        QMessageBox::critical(this, tr("Replacing failed"), tr("Can't open input file for reading"), QMessageBox::Ok);
+        return;
+    }
+
+    UByteArray buffer = inputFile.readAll();
+    inputFile.close();
+
+    USTATUS result = ffsOps->replace(index, buffer, mode);
+    if (result) {
+        QMessageBox::critical(this, tr("Replacing failed"), errorCodeToUString(result), QMessageBox::Ok);
+        return;
+    }
+    ui->actionSaveImageFile->setEnabled(true);
 }
 
 void UEFITool::extractAsIs()
